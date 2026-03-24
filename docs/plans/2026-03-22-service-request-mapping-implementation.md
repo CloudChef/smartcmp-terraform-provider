@@ -367,12 +367,12 @@ Expected: PASS.
 Run:
 
 ```bash
-SMARTCMP_TEST_BASE_URL="https://192.168.176.23" \
-SMARTCMP_TEST_USERNAME="admin" \
-SMARTCMP_TEST_PASSWORD="Passw0rd" \
+SMARTCMP_TEST_BASE_URL="https://smartcmp.example.com" \
+SMARTCMP_TEST_USERNAME="replace-with-username" \
+SMARTCMP_TEST_PASSWORD="replace-with-password" \
 SMARTCMP_TEST_TENANT_ID="default" \
 SMARTCMP_TEST_INSECURE="true" \
-NO_PROXY="192.168.176.23" \
+NO_PROXY="smartcmp.example.com" \
 go test ./internal/provider -run TestAcceptance -count=1 -v
 ```
 
