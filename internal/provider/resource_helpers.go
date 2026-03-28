@@ -192,6 +192,16 @@ func nullableString(value string) types.String {
 	return types.StringValue(value)
 }
 
+func setStringIfUnset(target *types.String, value string) {
+	if target == nil || strings.TrimSpace(value) == "" {
+		return
+	}
+
+	if target.IsNull() || target.IsUnknown() || strings.TrimSpace(target.ValueString()) == "" {
+		*target = types.StringValue(value)
+	}
+}
+
 func emptyStringList(ctx context.Context) (types.List, diag.Diagnostics) {
 	return types.ListValue(types.StringType, []attr.Value{})
 }
@@ -386,44 +396,32 @@ func waitForTaskTerminal(ctx context.Context, client *smartcmpclient.Client, id 
 
 func applyServiceRequestRaw(data *ServiceRequestResourceModel, raw map[string]any) {
 	data.ID = nullableString(findFirstString(raw, "id"))
-	if value := findFirstString(raw, "catalogId"); value != "" {
-		data.CatalogID = types.StringValue(value)
-	}
-	if value := findFirstString(raw, "businessGroupId"); value != "" {
-		data.BusinessGroupID = types.StringValue(value)
-	}
-	if value := findFirstString(raw, "name", "requestName"); value != "" {
-		data.Name = types.StringValue(value)
-	}
+	setStringIfUnset(&data.CatalogID, findFirstString(raw, "catalogId"))
+	setStringIfUnset(&data.BusinessGroupID, findFirstString(raw, "businessGroupId"))
+	setStringIfUnset(&data.Name, findFirstString(raw, "name", "requestName"))
 
 	description := findFirstString(raw, "description")
 	if description == "" {
 		description = findStringPath(raw, "genericRequest", "description")
 	}
-	if description != "" {
-		data.Description = types.StringValue(description)
-	}
+	setStringIfUnset(&data.Description, description)
 
 	groupID := findFirstString(raw, "projectId", "groupId")
 	if groupID == "" {
 		groupID = findStringPath(raw, "catalogServiceRequest", "projectId")
 	}
-	if groupID != "" {
-		data.ProjectID = types.StringValue(groupID)
-	}
+	setStringIfUnset(&data.ProjectID, groupID)
 
 	resourcePoolID := findFirstString(raw, "resourceBundleId")
 	if resourcePoolID == "" {
 		resourcePoolID = findStringPath(raw, "catalogServiceRequest", "resourceBundleId")
 	}
-	if resourcePoolID != "" {
-		data.ResourcePoolID = types.StringValue(resourcePoolID)
-	}
+	setStringIfUnset(&data.ResourcePoolID, resourcePoolID)
 
 	data.State = nullableString(findFirstString(raw, "state"))
 	data.ErrorMessage = nullableString(findFirstString(raw, "errMsg", "errorMessage", "message"))
 	data.CompletedAt = nullableString(timeStringValue(raw["completedDate"]))
-	data.RequestUserID = nullableString(findFirstString(raw, "requestUserId", "userId"))
+	setStringIfUnset(&data.RequestUserID, findFirstString(raw, "requestUserId", "userId"))
 	data.InventoryID = nullableString(findFirstString(raw, "inventoryId"))
 	data.ObjectID = nullableString(findFirstString(raw, "objectId"))
 	data.ObjectType = nullableString(findFirstString(raw, "objectType"))

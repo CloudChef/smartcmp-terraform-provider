@@ -83,6 +83,54 @@ func TestApplyServiceRequestRaw(t *testing.T) {
 	}
 }
 
+func TestApplyServiceRequestRawPreservesConfiguredInputs(t *testing.T) {
+	t.Parallel()
+
+	data := ServiceRequestResourceModel{
+		CatalogID:       types.StringValue("catalog-config"),
+		BusinessGroupID: types.StringValue("bg-config"),
+		Name:            types.StringValue("linux-config"),
+		Description:     types.StringValue("description-config"),
+		ProjectID:       types.StringValue("project-config"),
+		RequestUserID:   types.StringValue("user-config"),
+		ResourcePoolID:  types.StringValue("pool-config"),
+	}
+
+	applyServiceRequestRaw(&data, map[string]any{
+		"id":               "req-1",
+		"catalogId":        "catalog-raw",
+		"businessGroupId":  "bg-raw",
+		"name":             "linux-raw",
+		"description":      "description-raw",
+		"projectId":        "project-raw",
+		"requestUserId":    "user-raw",
+		"resourceBundleId": "pool-raw",
+		"state":            "FINISHED",
+	})
+
+	if got := data.CatalogID.ValueString(); got != "catalog-config" {
+		t.Fatalf("expected catalog_id to keep configured value, got %q", got)
+	}
+	if got := data.BusinessGroupID.ValueString(); got != "bg-config" {
+		t.Fatalf("expected business_group_id to keep configured value, got %q", got)
+	}
+	if got := data.Name.ValueString(); got != "linux-config" {
+		t.Fatalf("expected name to keep configured value, got %q", got)
+	}
+	if got := data.Description.ValueString(); got != "description-config" {
+		t.Fatalf("expected description to keep configured value, got %q", got)
+	}
+	if got := data.ProjectID.ValueString(); got != "project-config" {
+		t.Fatalf("expected project_id to keep configured value, got %q", got)
+	}
+	if got := data.RequestUserID.ValueString(); got != "user-config" {
+		t.Fatalf("expected request_user_id to keep configured value, got %q", got)
+	}
+	if got := data.ResourcePoolID.ValueString(); got != "pool-config" {
+		t.Fatalf("expected resource_pool_id to keep configured value, got %q", got)
+	}
+}
+
 func TestPopulateServiceRequestDeploymentIDsWithoutRequestID(t *testing.T) {
 	t.Parallel()
 
