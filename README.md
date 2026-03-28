@@ -260,6 +260,7 @@ Use `smartcmp_virtual_machine` when Terraform should own a VM from initial reque
 - Create uses the regular catalog request flow and waits for the deployment VM node to appear.
 - Set `power_state` to `started` or `stopped` when Terraform should keep the VM power state converged.
 - Changing `instance_type` triggers a tracked `stop -> resize` update.
+- vSphere and FusionCompute style VMs can resize directly from `cpu` and `memory_gb`, even when no instance-type flavor is exposed on the resource.
 - `start_after_resize` defaults to `false`, so Terraform leaves the VM stopped after a size change unless you opt in to restarting it.
 - Set `cpu` and `memory_gb` alongside `instance_type` when the platform cannot infer the target shape from the flavor alone.
 

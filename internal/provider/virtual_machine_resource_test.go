@@ -681,6 +681,169 @@ func TestVirtualMachineResourceUpdateResizeWithoutStart(t *testing.T) {
 	}
 }
 
+func TestVirtualMachineResourceUpdateResizesVSphereByCPUAndMemory(t *testing.T) {
+	t.Parallel()
+
+	var operations []map[string]any
+	currentStatus := "started"
+	currentCPU := 1
+	currentMemoryGB := 1.0
+
+	server := newTLSServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/platform-api/nodes/res-vm-vsphere":
+			_, _ = w.Write(encodeJSON(t, map[string]any{
+				"id":            "res-vm-vsphere",
+				"deploymentId":  "dep-vm-vsphere",
+				"status":        currentStatus,
+				"resourceType":  "cloudchef.vsphere.nodes.Server",
+				"componentType": "resource.iaas.machine.instance.vsphere",
+				"cloudEntryType": map[string]any{
+					"id": "yacmp:cloudentry:type:vsphere",
+				},
+				"exts": map[string]any{
+					"cpu":    currentCPU,
+					"memory": currentMemoryGB,
+				},
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/platform-api/nodes/resource-operations":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			operations = append(operations, body)
+			switch stringValue(body["operationId"]) {
+			case "stop":
+				currentStatus = "stopped"
+				_, _ = w.Write(encodeJSON(t, map[string]any{
+					"results":      map[string]any{"res-vm-vsphere": map[string]any{"id": "task-stop-vsphere", "state": "STARTED", "resourceIds": []string{"res-vm-vsphere"}}},
+					"webOperation": false,
+				}))
+			case "resize":
+				currentCPU = 2
+				currentMemoryGB = 4
+				_, _ = w.Write(encodeJSON(t, map[string]any{
+					"results":      map[string]any{"res-vm-vsphere": map[string]any{"id": "task-resize-vsphere", "state": "STARTED", "resourceIds": []string{"res-vm-vsphere"}}},
+					"webOperation": false,
+				}))
+			case "start":
+				currentStatus = "started"
+				_, _ = w.Write(encodeJSON(t, map[string]any{
+					"results":      map[string]any{"res-vm-vsphere": map[string]any{"id": "task-start-vsphere", "state": "STARTED", "resourceIds": []string{"res-vm-vsphere"}}},
+					"webOperation": false,
+				}))
+			default:
+				t.Fatalf("unexpected operation %q", stringValue(body["operationId"]))
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/platform-api/tasks/task-stop-vsphere":
+			_, _ = w.Write(encodeJSON(t, map[string]any{"id": "task-stop-vsphere", "state": "FINISHED"}))
+		case r.Method == http.MethodGet && r.URL.Path == "/platform-api/tasks/task-resize-vsphere":
+			_, _ = w.Write(encodeJSON(t, map[string]any{"id": "task-resize-vsphere", "state": "FINISHED"}))
+		case r.Method == http.MethodGet && r.URL.Path == "/platform-api/tasks/task-start-vsphere":
+			_, _ = w.Write(encodeJSON(t, map[string]any{"id": "task-start-vsphere", "state": "FINISHED"}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	})
+	defer server.Close()
+
+	apiClient, err := client.New(client.Config{
+		BaseURL:  server.URL,
+		Username: "user",
+		Password: "password",
+		TenantID: "default",
+		Insecure: true,
+	})
+	if err != nil {
+		t.Fatalf("client.New returned error: %v", err)
+	}
+
+	resourceUnderTest := &VirtualMachineResource{client: apiClient}
+	schema := requireResourceSchema(t, resourceUnderTest)
+
+	updateReq := newResourceUpdateRequest(t, schema,
+		map[string]tftypes.Value{
+			"id":                 tfStringValue("res-vm-vsphere"),
+			"resource_id":        tfStringValue("res-vm-vsphere"),
+			"deployment_id":      tfStringValue("dep-vm-vsphere"),
+			"catalog_id":         tfStringValue("catalog-1"),
+			"business_group_id":  tfStringValue("bg-1"),
+			"name":               tfStringValue("vm-vsphere"),
+			"instance_type":      tfStringValue(""),
+			"cpu":                tfInt64Value(1),
+			"memory_gb":          tfFloat64Value(1.0),
+			"start_after_resize": tfBoolValue(false),
+			"power_state":        tfStringValue("started"),
+		},
+		map[string]tftypes.Value{
+			"id":                 tfStringValue("res-vm-vsphere"),
+			"resource_id":        tfStringValue("res-vm-vsphere"),
+			"deployment_id":      tfStringValue("dep-vm-vsphere"),
+			"catalog_id":         tfStringValue("catalog-1"),
+			"business_group_id":  tfStringValue("bg-1"),
+			"name":               tfStringValue("vm-vsphere"),
+			"instance_type":      tfStringValue(""),
+			"cpu":                tfInt64Value(2),
+			"memory_gb":          tfFloat64Value(4.0),
+			"start_after_resize": tfBoolValue(true),
+			"power_state":        tfStringValue("started"),
+		},
+	)
+	updateResp := newResourceUpdateResponse(t, schema)
+	resourceUnderTest.Update(context.Background(), updateReq, &updateResp)
+	if updateResp.Diagnostics.HasError() {
+		t.Fatalf("update diagnostics: %v", updateResp.Diagnostics)
+	}
+
+	if len(operations) != 3 {
+		t.Fatalf("expected 3 operations, got %d", len(operations))
+	}
+	if got := stringValue(operations[0]["operationId"]); got != "stop" {
+		t.Fatalf("expected first operation stop, got %q", got)
+	}
+	if got := stringValue(operations[1]["operationId"]); got != "resize" {
+		t.Fatalf("expected second operation resize, got %q", got)
+	}
+	if got := stringValue(operations[2]["operationId"]); got != "start" {
+		t.Fatalf("expected third operation start, got %q", got)
+	}
+
+	params := asMap(operations[1]["executeParameters"])
+	if got := numberValue(params["numCPUs"]); got != 2 {
+		t.Fatalf("expected numCPUs 2, got %#v", params["numCPUs"])
+	}
+	if got := numberValue(params["cpus"]); got != 2 {
+		t.Fatalf("expected cpus 2, got %#v", params["cpus"])
+	}
+	if got := numberValue(params["memoryGB"]); got != 4 {
+		t.Fatalf("expected memoryGB 4, got %#v", params["memoryGB"])
+	}
+	if got := numberValue(params["memoryMB"]); got != 4096 {
+		t.Fatalf("expected memoryMB 4096, got %#v", params["memoryMB"])
+	}
+	if got := numberValue(params["originNumCPUs"]); got != 1 {
+		t.Fatalf("expected originNumCPUs 1, got %#v", params["originNumCPUs"])
+	}
+	if got := numberValue(params["originMemoryMB"]); got != 1024 {
+		t.Fatalf("expected originMemoryMB 1024, got %#v", params["originMemoryMB"])
+	}
+	if _, ok := params["flavorId"]; ok {
+		t.Fatalf("expected direct vSphere resize to omit flavorId, got %#v", params["flavorId"])
+	}
+
+	var updatedState VirtualMachineResourceModel
+	if diags := updateResp.State.Get(context.Background(), &updatedState); diags.HasError() {
+		t.Fatalf("state decode diagnostics: %v", diags)
+	}
+	if updatedState.CPU.ValueInt64() != 2 {
+		t.Fatalf("expected cpu 2, got %d", updatedState.CPU.ValueInt64())
+	}
+	if updatedState.MemoryGB.ValueFloat64() != 4 {
+		t.Fatalf("expected memory_gb 4, got %f", updatedState.MemoryGB.ValueFloat64())
+	}
+	if updatedState.Status.ValueString() != "started" {
+		t.Fatalf("expected status started, got %q", updatedState.Status.ValueString())
+	}
+}
+
 func TestVirtualMachineResourceUpdatePowerStateOnly(t *testing.T) {
 	t.Parallel()
 

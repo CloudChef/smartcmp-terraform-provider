@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -460,10 +461,14 @@ func (r *VirtualMachineResource) Update(ctx context.Context, req resource.Update
 	currentInstanceType := findFirstString(nodeRaw, "instanceType", "flavorId")
 	currentPowerState := normalizeVirtualMachinePowerState(findFirstString(nodeRaw, "status"))
 	desiredInstanceType := stringValueFromType(plan.InstanceType)
-	if desiredInstanceType != "" && desiredInstanceType != stringValueFromType(state.InstanceType) && desiredInstanceType != currentInstanceType {
-		targetCPU, targetMemoryGB, err := resolveResizeTarget(updateCtx, r.client, nodeRaw, desiredInstanceType, plan.CPU, plan.MemoryGB)
-		if err != nil {
-			resp.Diagnostics.AddError("Build SmartCMP resize request", err.Error())
+	targetCPU, targetMemoryGB, directResize, err := resolveVirtualMachineResizeTarget(updateCtx, r.client, nodeRaw, &plan, currentInstanceType)
+	if err != nil {
+		resp.Diagnostics.AddError("Build SmartCMP resize request", err.Error())
+		return
+	}
+	if directResize || (desiredInstanceType != "" && desiredInstanceType != stringValueFromType(state.InstanceType) && desiredInstanceType != currentInstanceType) {
+		if state.ID.ValueString() == "" {
+			resp.Diagnostics.AddError("Resize SmartCMP virtual machine", "resource_id is unavailable for resize")
 			return
 		}
 
@@ -477,21 +482,7 @@ func (r *VirtualMachineResource) Update(ctx context.Context, req resource.Update
 			currentPowerState = "stopped"
 		}
 
-		resourceName := findFirstString(nodeRaw, "resourceName", "name", "displayName", "externalName")
-		resizeParams := map[string]any{
-			"mode":           "upgrade",
-			"flavorId":       desiredInstanceType,
-			"flavor_id":      desiredInstanceType,
-			"cloudFlavorId":  desiredInstanceType,
-			"cpu":            targetCPU,
-			"numCPUs":        targetCPU,
-			"memory":         targetMemoryGB,
-			"memoryGB":       targetMemoryGB,
-			"resourceId":     state.ID.ValueString(),
-			"deploymentId":   state.DeploymentID.ValueString(),
-			"resourceName":   resourceName,
-			"updateAllocate": true,
-		}
+		resizeParams := buildVirtualMachineResizeParameters(nodeRaw, &state, desiredInstanceType, targetCPU, targetMemoryGB, directResize)
 		if err := executeTrackedResourceOperation(updateCtx, r.client, state.ID.ValueString(), "resize", resizeParams); err != nil {
 			resp.Diagnostics.AddError("Resize SmartCMP virtual machine", err.Error())
 			return
@@ -896,6 +887,112 @@ func resolveResizeTarget(ctx context.Context, client *client.Client, nodeRaw map
 		return cpu, memoryGB, nil
 	}
 	return 0, 0, fmt.Errorf("unable to infer cpu and memory_gb for instance_type %q; set cpu and memory_gb explicitly", desiredInstanceType)
+}
+
+func resolveVirtualMachineResizeTarget(ctx context.Context, client *client.Client, nodeRaw map[string]any, plan *VirtualMachineResourceModel, currentInstanceType string) (int64, float64, bool, error) {
+	desiredCPU, desiredMemoryGB := desiredVirtualMachineShape(nodeRaw, plan.CPU, plan.MemoryGB)
+	currentCPU := currentVirtualMachineCPU(nodeRaw)
+	currentMemoryGB := virtualMachineMemoryGB(nodeRaw)
+
+	if isDirectCPUResizePlatform(nodeRaw) {
+		cpuChanged := desiredCPU > 0 && currentCPU > 0 && desiredCPU != currentCPU
+		memoryChanged := desiredMemoryGB > 0 && currentMemoryGB > 0 && !floatEqual(desiredMemoryGB, currentMemoryGB)
+		if cpuChanged || memoryChanged {
+			return desiredCPU, desiredMemoryGB, true, nil
+		}
+	}
+
+	desiredInstanceType := stringValueFromType(plan.InstanceType)
+	if desiredInstanceType != "" && desiredInstanceType != currentInstanceType {
+		targetCPU, targetMemoryGB, err := resolveResizeTarget(ctx, client, nodeRaw, desiredInstanceType, plan.CPU, plan.MemoryGB)
+		if err != nil {
+			return 0, 0, false, err
+		}
+		return targetCPU, targetMemoryGB, false, nil
+	}
+
+	return 0, 0, false, nil
+}
+
+func buildVirtualMachineResizeParameters(nodeRaw map[string]any, state *VirtualMachineResourceModel, desiredInstanceType string, targetCPU int64, targetMemoryGB float64, directCPUResize bool) map[string]any {
+	resourceName := findFirstString(nodeRaw, "resourceName", "name", "displayName", "externalName")
+	params := map[string]any{
+		"mode":           "upgrade",
+		"cpu":            targetCPU,
+		"cpus":           targetCPU,
+		"numCPUs":        targetCPU,
+		"memory":         targetMemoryGB,
+		"memoryGB":       targetMemoryGB,
+		"memoryMB":       int64(math.Round(targetMemoryGB * 1024.0)),
+		"originNumCPUs":  currentVirtualMachineCPU(nodeRaw),
+		"originMemoryMB": int64(math.Round(virtualMachineMemoryGB(nodeRaw) * 1024.0)),
+		"resourceId":     state.ID.ValueString(),
+		"deploymentId":   state.DeploymentID.ValueString(),
+		"resourceName":   resourceName,
+		"updateAllocate": true,
+	}
+	if !directCPUResize && desiredInstanceType != "" {
+		params["flavorId"] = desiredInstanceType
+		params["flavor_id"] = desiredInstanceType
+		params["cloudFlavorId"] = desiredInstanceType
+	}
+	return params
+}
+
+func desiredVirtualMachineShape(nodeRaw map[string]any, cpuOverride types.Int64, memoryOverride types.Float64) (int64, float64) {
+	cpu := currentVirtualMachineCPU(nodeRaw)
+	if !cpuOverride.IsNull() && !cpuOverride.IsUnknown() && cpuOverride.ValueInt64() > 0 {
+		cpu = cpuOverride.ValueInt64()
+	}
+
+	memoryGB := virtualMachineMemoryGB(nodeRaw)
+	if !memoryOverride.IsNull() && !memoryOverride.IsUnknown() && memoryOverride.ValueFloat64() > 0 {
+		memoryGB = memoryOverride.ValueFloat64()
+	}
+	return cpu, memoryGB
+}
+
+func currentVirtualMachineCPU(nodeRaw map[string]any) int64 {
+	if cpu := int64(numberValue(rawValue(nodeRaw, "cpu", "numCPUs"))); cpu > 0 {
+		return cpu
+	}
+	if cpu := int64(numberValue(findStringValue(nodeRaw, "exts", "cpu"))); cpu > 0 {
+		return cpu
+	}
+	if cpu := int64(numberValue(findStringValue(asMap(nodeRaw["exts"]), "customProperty", "cpu"))); cpu > 0 {
+		return cpu
+	}
+	return 0
+}
+
+func isDirectCPUResizePlatform(nodeRaw map[string]any) bool {
+	values := []string{
+		findFirstString(nodeRaw, "cloudEntryTypeId", "resourceType", "componentType"),
+		findFirstString(asMap(nodeRaw["cloudEntryType"]), "id", "genericCloudSuffixName"),
+	}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch {
+		case strings.Contains(value, "vsphere"):
+			return true
+		case strings.Contains(value, "fusioncompute"):
+			return true
+		}
+	}
+	return false
+}
+
+func rawValue(raw map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := raw[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func floatEqual(left, right float64) bool {
+	return math.Abs(left-right) < 0.000001
 }
 
 func lookupInstanceTypeShape(ctx context.Context, client *client.Client, nodeRaw map[string]any, desiredInstanceType string) (int64, float64, error) {
