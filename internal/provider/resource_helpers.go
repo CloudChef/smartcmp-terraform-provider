@@ -437,7 +437,7 @@ func applyTaskRaw(ctx context.Context, data *ResourceOperationResourceModel, raw
 	}
 
 	if operation := findFirstString(raw, "operationName", "name"); operation != "" {
-		data.Operation = types.StringValue(operation)
+		setStringIfUnset(&data.Operation, operation)
 	}
 	if state := findFirstString(raw, "state"); state != "" {
 		data.TaskState = types.StringValue(state)
@@ -456,11 +456,11 @@ func applyTaskRaw(ctx context.Context, data *ResourceOperationResourceModel, raw
 	}
 
 	if targetID := findFirstString(raw, "deploymentId"); targetID != "" {
-		data.TargetKind = types.StringValue("deployment")
-		data.TargetID = types.StringValue(targetID)
+		setStringIfUnset(&data.TargetKind, "deployment")
+		setStringIfUnset(&data.TargetID, targetID)
 	} else if len(resourceIDs) > 0 {
-		data.TargetKind = types.StringValue("resource")
-		data.TargetID = types.StringValue(resourceIDs[0])
+		setStringIfUnset(&data.TargetKind, "resource")
+		setStringIfUnset(&data.TargetID, resourceIDs[0])
 	}
 
 	return diags

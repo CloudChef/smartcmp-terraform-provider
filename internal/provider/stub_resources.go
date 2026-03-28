@@ -618,7 +618,7 @@ func (r *ResourceOperationResource) Create(ctx context.Context, req resource.Cre
 		}
 
 		payload["operationId"] = data.Operation.ValueString()
-		payload["resourceIds"] = []string{data.TargetID.ValueString()}
+		payload["resourceIds"] = data.TargetID.ValueString()
 		if !data.Comment.IsNull() && !data.Comment.IsUnknown() && data.Comment.ValueString() != "" {
 			payload["comment"] = data.Comment.ValueString()
 		}

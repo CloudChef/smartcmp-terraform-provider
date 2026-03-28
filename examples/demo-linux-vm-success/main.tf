@@ -15,11 +15,12 @@ variable "credential_password" {
   description = "Initial root password for the provisioned VM. Pass it with TF_VAR_credential_password or -var."
   type        = string
   sensitive   = true
+  default     = "Sample_Password"
 }
 
 locals {
   request_name         = "tf-linux-success-20260328013340"
-  catalog_id           = "1ff5ae45-bd30-42ed-b2b8-0a17fb7eed57" # Linux VM-复制
+  catalog_id           = "1ff5ae45-bd30-42ed-b2b8-0a17fb7eed57" # Cloned Linux VM catalog
   business_group_id    = "922f3a25-a5c4-48f4-9c94-62aae02e4266" # School A
   request_user_id      = "9834cf8b-af1e-4c5b-99f3-0ed3080bc5ed" # tenant_user
   resource_bundle_id   = "5eadd756-d269-4570-b7fc-46139f7a2dad" # Huawei FCResource Bundle

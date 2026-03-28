@@ -385,6 +385,8 @@ func TestResourceOperationResourceCreateAndDeleteResourceTask(t *testing.T) {
 					"res-1": map[string]any{
 						"id":               "task-2",
 						"state":            "STARTED",
+						"operationName":    "REBOOT",
+						"deploymentId":     "dep-linked",
 						"resourceIds":      []string{"res-1"},
 						"genericRequestId": "req-2",
 					},
@@ -441,12 +443,29 @@ func TestResourceOperationResourceCreateAndDeleteResourceTask(t *testing.T) {
 	if got := stringValue(resourceBody["operationId"]); got != "powerOn" {
 		t.Fatalf("expected operationId powerOn, got %q", got)
 	}
-	if got := stringSliceFromAny(resourceBody["resourceIds"]); len(got) != 1 || got[0] != "res-1" {
-		t.Fatalf("expected resourceIds [res-1], got %#v", resourceBody["resourceIds"])
+	if got := stringValue(resourceBody["resourceIds"]); got != "res-1" {
+		t.Fatalf("expected resourceIds res-1, got %#v", resourceBody["resourceIds"])
 	}
 	params, ok := resourceBody["executeParameters"].(map[string]any)
 	if !ok || stringValue(params["reason"]) != "terraform" {
 		t.Fatalf("expected executeParameters to contain reason, got %#v", resourceBody["executeParameters"])
+	}
+
+	var createdState ResourceOperationResourceModel
+	if diags := createResp.State.Get(context.Background(), &createdState); diags.HasError() {
+		t.Fatalf("state decode diagnostics: %v", diags)
+	}
+	if createdState.Operation.ValueString() != "powerOn" {
+		t.Fatalf("expected configured operation to be preserved, got %q", createdState.Operation.ValueString())
+	}
+	if createdState.TargetKind.ValueString() != "resource" {
+		t.Fatalf("expected configured target_kind to be preserved, got %q", createdState.TargetKind.ValueString())
+	}
+	if createdState.TargetID.ValueString() != "res-1" {
+		t.Fatalf("expected configured target_id to be preserved, got %q", createdState.TargetID.ValueString())
+	}
+	if createdState.DeploymentID.ValueString() != "dep-linked" {
+		t.Fatalf("expected linked deployment_id dep-linked, got %q", createdState.DeploymentID.ValueString())
 	}
 
 	deleteReq := resource.DeleteRequest{
@@ -575,8 +594,8 @@ func TestResourceOperationResourceCreatePassesThroughFullPayload(t *testing.T) {
 	if got := stringValue(resourceBody["operationId"]); got != "resize" {
 		t.Fatalf("expected operationId resize, got %q", got)
 	}
-	if got := stringSliceFromAny(resourceBody["resourceIds"]); len(got) != 1 || got[0] != "res-2" {
-		t.Fatalf("expected resourceIds [res-2], got %#v", resourceBody["resourceIds"])
+	if got := stringValue(resourceBody["resourceIds"]); got != "res-2" {
+		t.Fatalf("expected resourceIds res-2, got %#v", resourceBody["resourceIds"])
 	}
 	params, ok := resourceBody["executeParameters"].(map[string]any)
 	if !ok || stringValue(params["computeProfileId"]) != "profile-large" {
