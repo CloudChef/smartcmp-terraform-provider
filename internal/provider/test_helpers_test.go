@@ -268,6 +268,34 @@ func newResourceDeleteResponse(t *testing.T, schema resourceschema.Schema) resou
 	}
 }
 
+func newResourceUpdateRequest(t *testing.T, schema resourceschema.Schema, stateValues map[string]tftypes.Value, planValues map[string]tftypes.Value) resource.UpdateRequest {
+	t.Helper()
+
+	attributes := make(map[string]attributeTypeCarrier, len(schema.Attributes))
+	for name, attribute := range schema.Attributes {
+		attributes[name] = attribute
+	}
+
+	return resource.UpdateRequest{
+		State: tfsdk.State{
+			Raw:    newObjectValueFromAttributes(attributes, stateValues),
+			Schema: schema,
+		},
+		Plan: tfsdk.Plan{
+			Raw:    newObjectValueFromAttributes(attributes, planValues),
+			Schema: schema,
+		},
+	}
+}
+
+func newResourceUpdateResponse(t *testing.T, schema resourceschema.Schema) resource.UpdateResponse {
+	t.Helper()
+
+	return resource.UpdateResponse{
+		State: tfsdk.State{Schema: schema},
+	}
+}
+
 type attributeTypeCarrier interface {
 	GetType() attr.Type
 }
@@ -296,6 +324,10 @@ func tfBoolValue(raw bool) tftypes.Value {
 }
 
 func tfInt64Value(raw int64) tftypes.Value {
+	return tftypes.NewValue(tftypes.Number, raw)
+}
+
+func tfFloat64Value(raw float64) tftypes.Value {
 	return tftypes.NewValue(tftypes.Number, raw)
 }
 

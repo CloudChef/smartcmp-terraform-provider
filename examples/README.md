@@ -11,5 +11,6 @@ The examples intentionally avoid hard-coding passwords or internal endpoints. Se
 - `datasources/resource-actions-by-ids/` shows how to discover actions for each resource in a batch
 - `resources/service-request/` shows the stable request shell plus dynamic resource-spec mapping
 - `resources/resource-operation/` shows the day-two operation contract
+- `resources/virtual-machine/` shows the Terraform-native VM lifecycle resource, including power-state management
 - `resources/vm-restart/` shows a restart task for an existing VM resource
 - `resources/vm-resize/` shows a resize task for an existing VM resource

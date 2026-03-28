@@ -238,16 +238,55 @@ Each discovered action returns stable typed metadata plus:
 
 ## Resources
 
-The provider exposes two request-oriented resources:
+The provider exposes these resources:
 
 - `smartcmp_service_request`
 - `smartcmp_resource_operation`
+- `smartcmp_virtual_machine`
 
 `smartcmp_service_request` submits a request through `/generic-request/submit`, tracks the resulting `GenericRequest`, and cancels the request during Terraform destroy when it is still non-terminal.
 
 `smartcmp_resource_operation` triggers either deployment day-two operations or resource operations, tracks the resulting `GenericTask`, and cancels the task during Terraform destroy when it is still running.
 
-The resources are intentionally request/task oriented. They do not model a VM or deployment lifecycle directly; they model the SmartCMP records returned by the platform APIs.
+`smartcmp_virtual_machine` creates a Terraform-owned VM through the SmartCMP catalog request flow, stores the resulting deployment and resource IDs in state, and reconciles `instance_type` changes through tracked resource operations.
+
+The request-oriented resources still exist because SmartCMP catalogs and day-two operations remain broader than just VM lifecycle management.
+
+### Managing Terraform-Owned VMs
+
+Use `smartcmp_virtual_machine` when Terraform should own a VM from initial request through later size changes.
+
+- The schema keeps common VM fields typed, but most create-time attributes are optional so SmartCMP can auto-select omitted defaults.
+- Create uses the regular catalog request flow and waits for the deployment VM node to appear.
+- Set `power_state` to `started` or `stopped` when Terraform should keep the VM power state converged.
+- Changing `instance_type` triggers a tracked `stop -> resize` update.
+- `start_after_resize` defaults to `false`, so Terraform leaves the VM stopped after a size change unless you opt in to restarting it.
+- Set `cpu` and `memory_gb` alongside `instance_type` when the platform cannot infer the target shape from the flavor alone.
+
+Example:
+
+```hcl
+resource "smartcmp_virtual_machine" "example" {
+  catalog_id        = "replace-with-a-real-catalog-id"
+  business_group_id = "replace-with-a-real-business-group-id"
+  request_user_id   = "replace-with-a-real-request-user-id"
+  resource_pool_id  = "replace-with-a-real-resource-bundle-id"
+  name              = "tf-vm-example"
+
+  instance_type       = "ecs.t6-c1m1.large"
+  cpu                 = 2
+  memory_gb           = 2
+  power_state         = "started"
+  compute_profile_id  = "replace-with-a-real-compute-profile-id"
+  logic_template_id   = "replace-with-a-real-logic-template-id"
+  credential_user     = "root"
+  credential_password = var.credential_password
+}
+```
+
+To stop the VM later, change `power_state` to `stopped` and run `terraform apply`.
+
+To resize the VM later, change `instance_type`, `cpu`, and `memory_gb`, then run `terraform apply`.
 
 ### Operating Existing VMs
 

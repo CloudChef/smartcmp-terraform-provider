@@ -211,6 +211,7 @@ func (p *SmartCMPProvider) Resources(_ context.Context) []func() resource.Resour
 	return []func() resource.Resource{
 		NewServiceRequestResource,
 		NewResourceOperationResource,
+		NewVirtualMachineResource,
 	}
 }
 
